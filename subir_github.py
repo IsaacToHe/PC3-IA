@@ -15,6 +15,8 @@ import time
 import webbrowser
 import requests
 
+sys.stdout.reconfigure(line_buffering=True)
+
 DIRECTORIO_ACTUAL = r"C:\Users\UPSJB\Downloads\PC3 - Inteligencia Artificial"
 PROJECT_DIR = (
     DIRECTORIO_ACTUAL
