@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEGIS-POSE WEB: Videojuego Full-Stack con MediaPipe, Python y MySQL</title>
+  <link rel="stylesheet" href="../static/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- BARRA SUPERIOR -->
+    <header class="top-bar">
+      <div class="brand">
+        <span class="brand-badge">PC3</span>
+        <div>
+          <h1><span class="accent">AEGIS-POSE WEB:</span> VIDEOJUEGO FULL-STACK CON MEDIAPIPE, PYTHON Y MYSQL</h1>
+          <p class="subtitle">Cámara Web Activa Permanente · Vectores Corporales MediaPipe (33 Puntos) · Física 2D · Python Flask + MySQL</p>
+        </div>
+      </div>
+
+      <div class="status-pills">
+        <div class="pill" id="cameraStatusPill">
+          <span class="dot" id="cameraDot"></span>
+          <span id="cameraStatusText">Iniciando cámara web...</span>
+        </div>
+        <div class="pill" id="dbStatusPill">
+          <span class="dot online" id="dbDot"></span>
+          <span id="dbStatusText">BD: Verificando...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="main-grid">
+      <!-- COLUMNA IZQUIERDA: CÁMARA EN VIVO PERMANENTE + VECTORES CORPORALES (60 FPS) -->
+      <section class="arena-panel">
+        <!-- CINTA SUPERIOR DE ESTADO Y CONTROLES DE PARTIDA -->
+        <div class="reference-hud-banner">
+          <div class="ref-banner-main">
+            <span>Vida: <strong class="cyan-txt" id="bannerHpText">100 HP</strong></span>
+            <span class="sep">|</span>
+            <span>Energía Escudo: <strong class="cyan-txt" id="bannerShieldText">100%</strong></span>
+            <span class="sep">|</span>
+            <span>Oleada: <strong class="orange-txt" id="bannerWaveText">1/3</strong></span>
+            <span class="sep">|</span>
+            <span>Puntaje: <strong class="yellow-txt" id="scoreValue">0</strong> <small id="comboValue">(x1)</small></span>
+          </div>
+
+          <div class="ref-banner-bars">
+            <div class="mini-bar-group">
+              <span>HP</span>
+              <div class="bar-track"><div class="bar-fill hp-fill" id="hpBar"></div></div>
+              <small id="hpValue">100/100</small>
+            </div>
+            <div class="mini-bar-group">
+              <span>ESCUDO</span>
+              <div class="bar-track"><div class="bar-fill shield-fill" id="shieldBar"></div></div>
+              <small id="shieldValue">100%</small>
+            </div>
+            <div class="cooldown-inline hidden" id="shieldCooldownBadge">ENFRIAMIENTO (3.0s)</div>
+            <div class="timer-pill" id="timerValue">00.0s / 70s</div>
+          </div>
+        </div>
+
+        <!-- BARRA DE CONTROL RÁPIDO (PARA INICIAR PARTIDA MIENTRAS LA CÁMARA SIGUE VISIBLE) -->
+        <div class="control-dock">
+          <div class="agent-input-group">
+            <label for="usernameInput">JUGADOR:</label>
+            <input
+              type="text"
+              id="usernameInput"
+              maxlength="50"
+              placeholder="Ej. Spartan_Aegis"
+              value="Agente_Aegis"
+            />
+          </div>
+
+          <div class="dock-buttons">
+            <button type="button" class="btn btn-primary" id="startCameraBtn">
+              ⚔️ INICIAR PARTIDA (CÁMARA POSE)
+            </button>
+            <button type="button" class="btn btn-secondary" id="startSimBtn" title="Alternar esqueleto simulado con mouse/teclado">
+              🕹️ MODO SIMULADOR
+            </button>
+          </div>
+
+          <div class="match-status-chip" id="matchStateChip">
+            🎥 CÁMARA Y VECTORES ACTIVOS (MODO PRÁCTICA LIBRE)
+          </div>
+        </div>
+
+        <!-- TARJETAS DE ESTADO DE LAS 3 POSES CORPORALES (a, b, c) EN TIEMPO REAL -->
+        <div class="pose-cards-strip">
+          <div class="pose-state-card" id="poseCardShield">
+            <div class="pose-title">a) ESCUDO DE ENERGÍA <span>(+25 pts)</span></div>
+            <p>Cruza los antebrazos en <strong>"X"</strong> frente al pecho (Muñecas 15-16 &lt; 65% hombros)</p>
+            <div class="pose-badge" id="poseBadgeShield">EN ESPERA</div>
+          </div>
+
+          <div class="pose-state-card" id="poseCardShot">
+            <div class="pose-title">b) DISPARO CINÉTICO <span>(+50 pts)</span></div>
+            <p>Extiende el brazo derecho rápido hacia los drones (<code>12→14→16</code> &gt; 1400 px/s)</p>
+            <div class="pose-badge" id="poseBadgeShot">VEL: <span id="maxSpeedHud">0</span> px/s</div>
+          </div>
+
+          <div class="pose-state-card" id="poseCardDodge">
+            <div class="pose-title">c) ESQUIVA CORPORAL <span>(Sin daño)</span></div>
+            <p>Inclínate lateralmente o agáchate para esquivar meteoritos rojos</p>
+            <div class="pose-badge" id="poseBadgeDodge">TORSO CENTRADO</div>
+          </div>
+        </div>
+
+        <!-- CONTENEDOR DEL CANVAS Y CÁMARA (SIEMPRE VISIBLE SIN BLOQUEOS) -->
+        <div class="canvas-wrapper" id="canvasContainer">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+          <!-- BANNER FLOTANTE COMPACTO DE FIN DE PARTIDA (NO TAPA LA CÁMARA) -->
+          <div class="floating-results hidden" id="matchResultsBox">
+            <div class="floating-results-header">
+              <strong id="overlayTitle">¡PARTIDA FINALIZADA!</strong>
+              <button type="button" class="close-results-btn" id="closeResultsBtn" title="Cerrar resumen">✕</button>
+            </div>
+            <p id="overlayDesc" class="floating-desc"></p>
+            <div class="result-grid">
+              <div class="res-stat"><span>Puntaje</span><strong id="resScore">0</strong></div>
+              <div class="res-stat"><span>Bloqueos</span><strong id="resBlocks">0</strong></div>
+              <div class="res-stat"><span>Drones</span><strong id="resHits">0</strong></div>
+              <div class="res-stat"><span>Precisión</span><strong id="resAccuracy">0%</strong></div>
+              <div class="res-stat"><span>Vel. Máx</span><strong id="resMaxSpeed">0 px/s</strong></div>
+              <div class="res-stat"><span>Oleada</span><strong id="resWave">1/3</strong></div>
+            </div>
+            <div class="save-status" id="saveStatusBanner">Guardando métricas en MySQL...</div>
+          </div>
+        </div>
+
+        <!-- BARRA TELEMÉTRICA INFERIOR -->
+        <div class="telemetry-bar">
+          <div>FPS: <strong id="fpsCounter">60</strong></div>
+          <div>Pose Activa: <strong id="activePoseTelemetry">DETECTANDO CUERPO...</strong></div>
+          <div>Ratio Muñecas/Hombros: <strong id="wristRatioTelemetry">--</strong></div>
+          <div>Vel. Muñeca Der (16): <strong id="wristSpeedTelemetry">0 px/s</strong></div>
+          <div>Bloqueos: <strong id="blocksTelemetry">0</strong></div>
+          <div>Disparos: <strong id="shotsTelemetry">0 / 0 (0%)</strong></div>
+        </div>
+      </section>
+
+      <!-- COLUMNA DERECHA: 2. MOTOR FÍSICO Y MATEMÁTICO (JS) + 3. RANKING MYSQL -->
+      <aside class="side-panel">
+        <!-- PANEL MATEMÁTICO EN VIVO (SECCIÓN 2 DE LA IMAGEN) -->
+        <div class="panel-card math-card">
+          <h2>2. VECTORES Y MOTOR MATEMÁTICO (EN VIVO)</h2>
+          <ul class="formula-list">
+            <li>
+              <div class="formula-header">
+                <span class="tag-orange">1) Vector Director Disparo (14→16)</span>
+                <code id="liveVectorText">v = (0, 0)</code>
+              </div>
+              <p>Vector naranja del antebrazo derecho: <code>v = P_muñeca16 - P_codo14</code> y unitario <code>û = v / ||v||</code>.</p>
+            </li>
+            <li>
+              <div class="formula-header">
+                <span class="tag-cyan">2) Vector Escudo (15↔16)</span>
+                <code id="liveShieldDistText">d(P, AC) &lt; R</code>
+              </div>
+              <p>Segmento vectorial entre muñecas <code>A(15)</code> y <code>C(16)</code> con proyección ortogonal <code>B</code>.</p>
+            </li>
+            <li>
+              <div class="formula-header">
+                <span class="tag-red">3) Polígono Vectorial Torso</span>
+                <code id="liveTorsoText">Polígono [11, 12, 24, 23]</code>
+              </div>
+              <p>Cuadrilátero dinámico de hombros (<code>11-12</code>) y caderas (<code>23-24</code>) + centro de masa <code>G</code>.</p>
+            </li>
+          </ul>
+        </div>
+
+        <!-- PANEL 3: ARQUITECTURA FULL-STACK Y RANKING GLOBAL TOP 10 (MYSQL) -->
+        <div class="panel-card ranking-card">
+          <div class="card-header">
+            <h2>3. RANKING GLOBAL TOP 10 (MySQL)</h2>
+            <button type="button" class="btn-icon" id="refreshRankingBtn" title="Consultar MySQL">↻</button>
+          </div>
+          <p class="card-caption" id="rankingSourceLabel">Tablas `jugadores` y `partidas` (aegis_pose_db)</p>
+
+          <div class="table-container">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Jugador</th>
+                  <th>Pts</th>
+                  <th>🛡️</th>
+                  <th>🎯</th>
+                  <th>Vel.Máx</th>
+                  <th>Oleada</th>
+                </tr>
+              </thead>
+              <tbody id="rankingTableBody">
+                <tr>
+                  <td colspan="7" class="empty-row">Cargando clasificaciones...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- MINIATURA PERMANENTE DE REFERENCIA DE POSES -->
+        <div class="panel-card ref-mini-card">
+          <h2>📸 GUÍA VISUAL DE POSES</h2>
+          <img src="../static/img/referencia_poses.jpg" alt="Guía de Poses" class="side-ref-img" />
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- LÓGICA DEL JUEGO Y MEDIAPIPE POSE LANDMARKER -->
+  <script type="module" src="../static/js/game.js"></script>
+</body>
+</html>
