@@ -2,39 +2,33 @@
 ===============================================================================
 ALGORITMO AUTOMATIZADO PARA SUBIR EL PROYECTO A GITHUB
 Directorio Actual: C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial
+Repositorio Destino: https://github.com/IsaacToHe/PC3-IA.git
 Actividad PC3 - Aegis-Pose Web Game (MediaPipe Pose + Python Flask + MySQL)
-===============================================================================
-Soporta dos modos de operación desde el directorio actual:
-  Modo A: Mediante Git CLI (git init -> add -> commit -> remote -> push)
-  Modo B: Mediante GitHub REST API directa (con Token Personal, sin requerir Git)
 ===============================================================================
 """
 
-import base64
 import os
 import shutil
 import subprocess
 import sys
+import time
+import webbrowser
 import requests
 
-# Directorio actual de trabajo configurado explícitamente
 DIRECTORIO_ACTUAL = r"C:\Users\UPSJB\Downloads\PC3 - Inteligencia Artificial"
 PROJECT_DIR = (
     DIRECTORIO_ACTUAL
     if os.path.isdir(DIRECTORIO_ACTUAL)
     else os.path.dirname(os.path.abspath(__file__))
 )
+REPO_URL_DEFAULT = "https://github.com/IsaacToHe/PC3-IA.git"
 
-IGNORE_DIRS = {"__pycache__", ".git", "venv", ".venv", ".idea", ".vscode"}
-IGNORE_EXTS = {".pyc", ".pyo", ".db"}
+# Client ID oficial de GitHub CLI / Git Credential Manager para Device Flow OAuth
+GITHUB_OAUTH_CLIENT_ID = "178c6fc778ccc68e1d6a"
 
 
 def encontrar_ejecutable_git():
-    """Paso 1 del Algoritmo: Localizar el binario de Git en el sistema."""
-    git_path = shutil.which("git")
-    if git_path:
-        return git_path
-
+    """Localiza el binario de Git (incluyendo MinGit portable)."""
     rutas_comunes = [
         r"C:\Users\UPSJB\.gemini\antigravity\scratch\MinGit\cmd\git.exe",
         r"C:\Program Files\Git\cmd\git.exe",
@@ -45,206 +39,130 @@ def encontrar_ejecutable_git():
     for ruta in rutas_comunes:
         if os.path.exists(ruta):
             return ruta
-    return None
+    return shutil.which("git")
 
 
-def ejecutar_comando_git(git_bin, args):
-    """Ejecuta un comando Git dentro de C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial."""
-    cmd = [git_bin] + args
-    print(f"  > [{PROJECT_DIR}] $ {' '.join(cmd)}")
-    res = subprocess.run(cmd, cwd=PROJECT_DIR, text=True, capture_output=True)
+def ejecutar_comando_git(git_bin, args, ocultar_url=False):
+    """Ejecuta un comando Git en C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial."""
+    if not ocultar_url:
+        print(f"  > git {' '.join(args)}")
+    res = subprocess.run([git_bin] + args, cwd=PROJECT_DIR, text=True, capture_output=True)
     if res.stdout.strip():
         print(f"    {res.stdout.strip()}")
-    if res.returncode != 0 and res.stderr.strip():
-        print(f"    [Aviso] {res.stderr.strip()}")
-    return res.returncode == 0
+    if res.returncode != 0 and res.stderr.strip() and not ocultar_url:
+        print(f"    {res.stderr.strip()}")
+    return res.returncode == 0, res.stderr.strip()
 
 
-def asegurar_identidad_git(git_bin, nombre_default="Agente_Aegis", email_default="aegis@upsjb.edu.pe"):
-    """Verifica que Git tenga user.name y user.email configurados para no fallar en git commit."""
-    res_name = subprocess.run(
-        [git_bin, "config", "user.name"], cwd=PROJECT_DIR, text=True, capture_output=True
-    )
-    if not res_name.stdout.strip():
-        ejecutar_comando_git(git_bin, ["config", "user.name", nombre_default])
-
-    res_email = subprocess.run(
-        [git_bin, "config", "user.email"], cwd=PROJECT_DIR, text=True, capture_output=True
-    )
-    if not res_email.stdout.strip():
-        ejecutar_comando_git(git_bin, ["config", "user.email", email_default])
-
-
-def subir_con_git_cli(git_bin, repo_url, commit_msg):
+def autenticar_con_navegador_device_flow():
     """
-    Algoritmo con Git CLI ejecutado directamente sobre:
-    C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial
+    Inicia el flujo OAuth Device Flow de GitHub:
+    Muestra un código de 8 dígitos, abre https://github.com/login/device en el
+    navegador y espera a que el usuario autorice con un clic.
     """
+    headers = {"Accept": "application/json"}
+    resp = requests.post(
+        "https://github.com/login/device/code",
+        headers=headers,
+        data={"client_id": GITHUB_OAUTH_CLIENT_ID, "scope": "repo"},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        print(f"❌ No se pudo iniciar Device Flow: {resp.text}")
+        return None
+
+    data = resp.json()
+    user_code = data["user_code"]
+    verification_uri = data["verification_uri"]
+    device_code = data["device_code"]
+    interval = int(data.get("interval", 5))
+
+    print("\n" + "=" * 72)
+    print(f" 🔐 AUTORIZACIÓN RÁPIDA DE GITHUB EN TU NAVEGADOR")
+    print("=" * 72)
+    print(f"  1. Se abrirá: {verification_uri}")
+    print(f"  2. Ingresa este código en GitHub:  👉  {user_code}  👈")
+    print("=" * 72)
+
+    try:
+        webbrowser.open(verification_uri)
+    except Exception:
+        pass
+
+    print("\nEsperando a que ingreses el código en el navegador...")
+    while True:
+        time.sleep(interval)
+        poll = requests.post(
+            "https://github.com/login/oauth/access_token",
+            headers=headers,
+            data={
+                "client_id": GITHUB_OAUTH_CLIENT_ID,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            },
+            timeout=15,
+        )
+        p_data = poll.json()
+        if "access_token" in p_data:
+            print("✔ ¡Autorización completada en GitHub!")
+            return p_data["access_token"]
+        err = p_data.get("error")
+        if err == "authorization_pending":
+            continue
+        elif err == "slow_down":
+            interval += 5
+        else:
+            print(f"❌ Autorización cancelada o expirada: {err}")
+            return None
+
+
+def subir_a_github():
     os.chdir(PROJECT_DIR)
-    print(f"\n📂 Directorio activo fijado en: {os.getcwd()}")
+    git_bin = encontrar_ejecutable_git()
+    if not git_bin:
+        print("❌ No se encontró git.exe.")
+        sys.exit(1)
 
-    print("\n[PASO 1/5] Inicializando repositorio Git local...")
+    print("=" * 72)
+    print(" SUBIENDO PROYECTO A GITHUB (IsaacToHe/PC3-IA)")
+    print(f" Directorio: {PROJECT_DIR}")
+    print("=" * 72)
+
     ejecutar_comando_git(git_bin, ["init"])
-    asegurar_identidad_git(git_bin)
-
-    print("\n[PASO 2/5] Configurando rama principal 'main'...")
+    ejecutar_comando_git(git_bin, ["config", "user.name", "IsaacToHe"])
+    ejecutar_comando_git(git_bin, ["config", "user.email", "IsaacToHe@users.noreply.github.com"])
+    ejecutar_comando_git(git_bin, ["add", "."])
+    ejecutar_comando_git(
+        git_bin,
+        ["commit", "-m", "feat: Actividad PC3 - Aegis-Pose Web Game (MediaPipe Pose + Flask + MySQL)"],
+    )
     ejecutar_comando_git(git_bin, ["branch", "-M", "main"])
 
-    print("\n[PASO 3/5] Agregando archivos del directorio actual al Staging Area...")
-    ejecutar_comando_git(git_bin, ["add", "."])
-
-    print("\n[PASO 4/5] Creando commit con los archivos de la Actividad PC3...")
-    ejecutar_comando_git(git_bin, ["commit", "-m", commit_msg])
-
-    print("\n[PASO 5/5] Vinculando repositorio remoto y subiendo a GitHub...")
     check_remote = subprocess.run(
         [git_bin, "remote"], cwd=PROJECT_DIR, text=True, capture_output=True
     )
     if "origin" in check_remote.stdout.split():
-        ejecutar_comando_git(git_bin, ["remote", "set-url", "origin", repo_url])
+        ejecutar_comando_git(git_bin, ["remote", "set-url", "origin", REPO_URL_DEFAULT])
     else:
-        ejecutar_comando_git(git_bin, ["remote", "add", "origin", repo_url])
+        ejecutar_comando_git(git_bin, ["remote", "add", "origin", REPO_URL_DEFAULT])
 
-    exito = ejecutar_comando_git(git_bin, ["push", "-u", "origin", "main"])
-    if exito:
-        print("\n✔ ¡PROYECTO SUBIDO EXITOSAMENTE A GITHUB DESDE TU DIRECTORIO ACTUAL!")
-    else:
-        print(
-            "\n⚠ El push requirió autenticación o encontró un conflicto. "
-            "Verifica tus credenciales de GitHub."
-        )
+    token = autenticar_con_navegador_device_flow()
+    if not token:
+        sys.exit(1)
 
-
-def recolectar_archivos_proyecto():
-    """Recorre recursivamente C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial."""
-    archivos = []
-    for root, dirs, files in os.walk(PROJECT_DIR):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
-        for f in files:
-            ext = os.path.splitext(f)[1].lower()
-            if ext in IGNORE_EXTS:
-                continue
-            full_path = os.path.join(root, f)
-            rel_path = os.path.relpath(full_path, PROJECT_DIR).replace("\\", "/")
-            archivos.append((rel_path, full_path))
-    return archivos
-
-
-def subir_con_api_github(token, usuario, nombre_repo, commit_msg):
-    """
-    Algoritmo Alternativo (Sin necesidad de tener Git instalado):
-    Sube todos los archivos de C:\\Users\\UPSJB\\Downloads\\PC3 - Inteligencia Artificial
-    usando la API REST v3 de GitHub.
-    """
-    os.chdir(PROJECT_DIR)
-    print(f"\n📂 Directorio activo fijado en: {os.getcwd()}")
-
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json",
-    }
-
-    print(f"\n[PASO 1/3] Verificando o creando el repositorio '{usuario}/{nombre_repo}'...")
-    repo_api = f"https://api.github.com/repos/{usuario}/{nombre_repo}"
-    r = requests.get(repo_api, headers=headers, timeout=15)
-    if r.status_code == 404:
-        create_resp = requests.post(
-            "https://api.github.com/user/repos",
-            headers=headers,
-            json={
-                "name": nombre_repo,
-                "description": "Actividad PC3: Aegis-Pose Web Game (MediaPipe Pose + Python Flask + MySQL)",
-                "private": False,
-                "auto_init": True,
-            },
-            timeout=15,
-        )
-        if create_resp.status_code not in (200, 201):
-            print(f"❌ Error creando repositorio: {create_resp.text}")
-            return
-        print("  ✔ Repositorio creado en GitHub.")
-    elif r.status_code == 200:
-        print("  ✔ El repositorio ya existe en GitHub.")
-    else:
-        print(f"❌ Error de autenticación ({r.status_code}): {r.text}")
-        return
-
-    archivos = recolectar_archivos_proyecto()
-    print(f"\n[PASO 2/3] Subiendo {len(archivos)} archivos desde '{PROJECT_DIR}' vía API REST...")
-
-    for rel_path, full_path in archivos:
-        with open(full_path, "rb") as fh:
-            contenido_b64 = base64.b64encode(fh.read()).decode("utf-8")
-
-        url_archivo = f"https://api.github.com/repos/{usuario}/{nombre_repo}/contents/{rel_path}"
-        get_file = requests.get(url_archivo, headers=headers, timeout=15)
-        payload = {
-            "message": commit_msg,
-            "content": contenido_b64,
-            "branch": "main",
-        }
-        if get_file.status_code == 200:
-            payload["sha"] = get_file.json().get("sha")
-
-        put_resp = requests.put(url_archivo, headers=headers, json=payload, timeout=20)
-        if put_resp.status_code in (200, 201):
-            print(f"  ✔ Subido: {rel_path}")
-        else:
-            print(f"  ⚠ Error en {rel_path}: {put_resp.status_code} - {put_resp.text}")
-
-    print("\n[PASO 3/3] ¡Proceso finalizado!")
-    print(f"🌐 URL de tu repositorio: https://github.com/{usuario}/{nombre_repo}")
-
-
-def main():
-    os.chdir(PROJECT_DIR)
-    print("=" * 76)
-    print(" ALGORITMO DE SUBIDA A GITHUB - AEGIS-POSE WEB GAME (PC3)")
-    print(f" Directorio Actual: {PROJECT_DIR}")
-    print("=" * 76)
-
-    commit_msg = (
-        "feat: Actividad PC3 - Aegis-Pose Web Game (MediaPipe Pose + Flask + MySQL)"
+    auth_url = f"https://IsaacToHe:{token}@github.com/IsaacToHe/PC3-IA.git"
+    print("\n  > git push -u origin main")
+    exito, err_msg = ejecutar_comando_git(
+        git_bin, ["push", "-u", auth_url, "main:main", "--force"], ocultar_url=True
     )
-    git_bin = encontrar_ejecutable_git()
-
-    if git_bin:
-        print(f"✔ Git detectado en: {git_bin}")
-        print("\nSelecciona el método de subida:")
-        print("  [1] Subir usando comandos Git (URL de tu repositorio)")
-        print("  [2] Subir directo usando Token Personal de GitHub (API REST)")
-        opcion = input("\nOpción (1 o 2) [1]: ").strip() or "1"
+    if exito:
+        print("\n" + "=" * 72)
+        print(" ✔ ¡PROYECTO SUBIDO EXITOSAMENTE A GITHUB!")
+        print(" 🌐 Repositorio: https://github.com/IsaacToHe/PC3-IA")
+        print("=" * 72)
     else:
-        print("ℹ Git CLI no está instalado en este equipo.")
-        print("  Se utilizará el Modo Directo mediante la API REST de GitHub (sin requerir Git).")
-        opcion = "2"
-
-    if opcion == "1" and git_bin:
-        repo_url = (
-            input(
-                "\nURL de tu repositorio en GitHub [https://github.com/IsaacToHe/PC3-IA.git]: "
-            ).strip()
-            or "https://github.com/IsaacToHe/PC3-IA.git"
-        )
-        subir_con_git_cli(git_bin, repo_url, commit_msg)
-    else:
-        print("\n--- SUBIDA DIRECTA DESDE TU DIRECTORIO ACTUAL CON GITHUB API ---")
-        usuario = (
-            input("Tu nombre de usuario de GitHub [IsaacToHe]: ").strip()
-            or "IsaacToHe"
-        )
-        nombre_repo = (
-            input("Nombre del repositorio en GitHub [PC3-IA]: ").strip()
-            or "PC3-IA"
-        )
-        token = input(
-            "Tu Personal Access Token de GitHub (con permiso 'repo'): "
-        ).strip()
-        if not usuario or not token:
-            print("❌ Usuario y Token son obligatorios para usar la API de GitHub.")
-            sys.exit(1)
-        subir_con_api_github(token, usuario, nombre_repo, commit_msg)
+        print(f"\n❌ Error en git push: {err_msg}")
 
 
 if __name__ == "__main__":
-    main()
+    subir_a_github()
